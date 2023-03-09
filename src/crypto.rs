@@ -162,7 +162,7 @@ fn shift_rows(word: [u8; 4], shift: usize) -> [u8; 4] {
     let mut word_copy = word.clone();
 
     for i in 0..4 {
-        word_copy[i] = word[(i + shift) % 3]
+        word_copy[i] = word[(i + shift) % 4]
     }
 
     return word_copy;
@@ -170,7 +170,7 @@ fn shift_rows(word: [u8; 4], shift: usize) -> [u8; 4] {
 
 fn mix_columns(word: [u8; 4]) -> [u8; 4] {
 
-    let MDS = [
+    let MDS: [[u8; 4]; 4] = [
         [2, 3, 1, 1],
         [1, 2, 3, 1],
         [1, 1, 2, 3],
@@ -183,7 +183,8 @@ fn mix_columns(word: [u8; 4]) -> [u8; 4] {
         let MDS_row = MDS[i];
         let b = word[i];
 
-        new_word[i] = (MDS_row[0] * b) + (MDS_row[1] * b) + (MDS_row[2] * b) + (MDS_row[3] * b);
+        new_word[i] = (MDS_row[0].wrapping_mul( b)) ^ (MDS_row[1].wrapping_mul( b)) ^
+            (MDS_row[2].wrapping_mul( b)) ^ (MDS_row[3].wrapping_mul( b));
     }
 
     return new_word;
@@ -191,34 +192,46 @@ fn mix_columns(word: [u8; 4]) -> [u8; 4] {
 
 pub(crate) fn encrypt_data(plaintext: [u8; 16], keys: [[u8; 16]; 11]) -> [u8; 16] {
     let mut ciphertext :[u8; 16] = plaintext.clone();
+    let encryption_key = keys[0];
 
-    for i in 0..10 {
+    //Perform the initial XOR
+    for i in 0..16 {
+        ciphertext[i] = ciphertext[i] ^ encryption_key[i];
+    }
+
+    for i in 1..11 {
         // Perform the S-Box
-        for c in 0..4 {
+        for c in 0..16 {
             ciphertext[c] = affine_transform(ciphertext[c]);
         }
 
         //Perform the row shift
         for c in 0..4 {
-            let word = &ciphertext[c*4..(c+1)*4];
+            let mut word : [u8; 4] = <[u8; 4]>::try_from(&ciphertext[c * 4..(c + 1) * 4]).unwrap();
+
+            for y in 0..4 {
+                word[y] = ciphertext[c + (y * 4)];
+            }
+
             let shift_word = shift_rows(<[u8; 4]>::try_from(word).unwrap(), c);
             for y in 0..4 {
-                ciphertext[(c*4) + y] = shift_word[y]
+                ciphertext[c + (y * 4)] = shift_word[y]
             }
         }
+        if i != 10 { // Skip the mix column for the last round
+            // Mix the columns
+            for c in 0..4 {
+                let mut column: [u8; 4] = [0, 0, 0, 0];
 
-        // Mix the columns
-        for c in 0..4 {
-            let mut column: [u8; 4] = [0, 0, 0, 0];
+                for y in 0..3 {
+                    column[y] = ciphertext[(c*y) + y];
+                }
 
-            for y in 0..3 {
-                column[y] = ciphertext[(c*y) + y];
-            }
+                let mixed_column = mix_columns(column);
 
-            let mixed_column = mix_columns(column);
-
-            for y in 0..3 {
-                ciphertext[(c*y) + y] = mixed_column[y];
+                for y in 0..3 {
+                    ciphertext[(c*y) + y] = mixed_column[y];
+                }
             }
         }
 
@@ -228,8 +241,6 @@ pub(crate) fn encrypt_data(plaintext: [u8; 16], keys: [[u8; 16]; 11]) -> [u8; 16
         }
 
     }
-
-    let s = String::from_utf8(ciphertext.to_vec()).expect("Found invalid UTF-8");
 
     return ciphertext;
 }

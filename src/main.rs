@@ -12,7 +12,8 @@ fn main() {
     print!("Done");
 
     let ciphertext = encrypt_data(<[u8; 16]>::try_from(plaintext.as_bytes()).unwrap(), keys);
-    print!("\nCiphertext: {:x?}", ciphertext);
+    let s = String::from_utf8(ciphertext.to_vec()).expect("Found invalid UTF-8");
+    print!("\nCiphertext: {:x?}", s);
     //
     // let decrypted = decrypt_data(ciphertext, keys);
     // print!("\nDecrypted text: {:x?}", decrypted);
