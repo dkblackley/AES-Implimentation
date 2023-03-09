@@ -1,15 +1,19 @@
-use crate::key_gen::{make_keys, print_key};
+use crate::crypto::{make_keys, print_key, get_128b_key, encrypt_data};
 
-mod key_gen;
+mod crypto;
 
 fn main() {
-    println!("Hello, world!");
+    let plaintext = "Two One Nine Two";
+    let encryption_key = get_128b_key();
+    let encryption_key = <[u8; 16]>::try_from("Thats my Kung Fu".as_bytes()).unwrap();
+    print_key(encryption_key);
 
-    let keys = make_keys();
-    print_key(keys[0])
-    //print!("{}\n", affine_transform(number));
+    let keys = make_keys(encryption_key, plaintext);
+    print!("Done");
 
-    // let value_1 = output[0];
-    // let string_utf8_result = String::from_utf8_lossy(&output);
-    // println!("{}", string_utf8_result);
+    let ciphertext = encrypt_data(<[u8; 16]>::try_from(plaintext.as_bytes()).unwrap(), keys);
+    print!("\nCiphertext: {:x?}", ciphertext);
+    //
+    // let decrypted = decrypt_data(ciphertext, keys);
+    // print!("\nDecrypted text: {:x?}", decrypted);
 }

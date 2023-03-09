@@ -5,7 +5,7 @@ use std::num::Wrapping;
 use std::ptr::null;
 
 
-fn get_128b_key() -> [u8; 16] {
+pub(crate) fn get_128b_key() -> [u8; 16] {
 
     let mut arr = [0u8; 16]; // Store 8 bit numbers and store 16 of them.
     thread_rng().try_fill(&mut arr[..]).expect("Ooops!");
@@ -51,7 +51,7 @@ fn sub_word(a: [u8; 4]) -> [u8; 4] {
 
     let mut words: [u8; 4] = [0, 0, 0, 0];
 
-    for i in 0..3 {
+    for i in 0..4 {
         words[i] = affine_transform(a[i]);
     }
 
@@ -103,10 +103,18 @@ fn rc(i: u8) -> u8 { // Remember 0 counts as a number!
     return 0x00; // this will never be reached, but i want to make my if/else statements mirror the formula
 }
 
-pub(crate) fn make_keys() -> [[u8; 16]; 11] {
+pub(crate) fn make_keys(encryption_key: [u8; 16], plaintext: &str) -> [[u8; 16]; 11] {
+
+    let mut first_key = [0u8; 16];
+    let plaintext_b = <[u8; 16]>::try_from(plaintext.as_bytes()).unwrap();
+
+    for i in 0..16 {
+        first_key[i] = encryption_key[i] ^ plaintext_b[i]
+    }
+
+    first_key = encryption_key;
 
     let mut keys = [[0u8; 16]; 11];
-    let first_key = get_128b_key();
     print_key(first_key);
     keys[0] = first_key;
 
@@ -121,13 +129,6 @@ pub(crate) fn make_keys() -> [[u8; 16]; 11] {
         last_word = sub_word(last_word);
         let rc_i = rc(i as u8);
         last_word[0] = last_word[0] ^ rc_i;
-
-
-        // for w in 0..2 {
-        //     key[w] = key[w] ^ last_word[w];
-        //     last_word[w] = key[w + 1]
-        // }
-        // key[3] = key[3] ^ last_word[3]; // do last key manually to avoid invalid memory location
 
         //Now we XOR the words to make the new key
         let mut next_key: [u8; 16] = [0u8; 16];
@@ -149,11 +150,90 @@ pub(crate) fn make_keys() -> [[u8; 16]; 11] {
 
 pub(crate) fn print_key(arr: [u8; 16]) {
 
-    let mut word: Vec<u8> = vec![]; //Empty "ArrayList" of bytes
-
-    print!("ENCRYPTION KEY: ");
+    print!("\nENCRYPTION KEY: ");
 
     for character in arr {
         print!("{:x?} ", character);
     }
 }
+
+fn shift_rows(word: [u8; 4], shift: usize) -> [u8; 4] {
+
+    let mut word_copy = word.clone();
+
+    for i in 0..4 {
+        word_copy[i] = word[(i + shift) % 3]
+    }
+
+    return word_copy;
+}
+
+fn mix_columns(word: [u8; 4]) -> [u8; 4] {
+
+    let MDS = [
+        [2, 3, 1, 1],
+        [1, 2, 3, 1],
+        [1, 1, 2, 3],
+        [3, 1, 1, 2]
+    ];
+
+    let mut new_word: [u8; 4] = [0, 0, 0, 0];
+
+    for i in 0..4 {
+        let MDS_row = MDS[i];
+        let b = word[i];
+
+        new_word[i] = (MDS_row[0] * b) + (MDS_row[1] * b) + (MDS_row[2] * b) + (MDS_row[3] * b);
+    }
+
+    return new_word;
+}
+
+pub(crate) fn encrypt_data(plaintext: [u8; 16], keys: [[u8; 16]; 11]) -> [u8; 16] {
+    let mut ciphertext :[u8; 16] = plaintext.clone();
+
+    for i in 0..10 {
+        // Perform the S-Box
+        for c in 0..4 {
+            ciphertext[c] = affine_transform(ciphertext[c]);
+        }
+
+        //Perform the row shift
+        for c in 0..4 {
+            let word = &ciphertext[c*4..(c+1)*4];
+            let shift_word = shift_rows(<[u8; 4]>::try_from(word).unwrap(), c);
+            for y in 0..4 {
+                ciphertext[(c*4) + y] = shift_word[y]
+            }
+        }
+
+        // Mix the columns
+        for c in 0..4 {
+            let mut column: [u8; 4] = [0, 0, 0, 0];
+
+            for y in 0..3 {
+                column[y] = ciphertext[(c*y) + y];
+            }
+
+            let mixed_column = mix_columns(column);
+
+            for y in 0..3 {
+                ciphertext[(c*y) + y] = mixed_column[y];
+            }
+        }
+
+        //And finally, XOR
+        for c in 0..16 {
+            ciphertext[c] = ciphertext[c] ^ keys[i][c]
+        }
+
+    }
+
+    let s = String::from_utf8(ciphertext.to_vec()).expect("Found invalid UTF-8");
+
+    return ciphertext;
+}
+//
+// pub(crate) fn decrypt_data(ciphertext: String, keys: [[u8; 16]; 10]) -> String {
+//
+//
