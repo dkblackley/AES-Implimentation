@@ -1,4 +1,4 @@
-use crate::crypto::{make_keys, print_key, get_128b_key, encrypt_data};
+use crate::crypto::{make_keys, print_key, get_128b_key, encrypt_data, decrypt_data};
 
 mod crypto;
 
@@ -10,10 +10,15 @@ fn main() {
 
     let keys = make_keys(encryption_key, plaintext);
     print!("Done");
+    let plaintext_b = <[u8; 16]>::try_from(plaintext.as_bytes()).unwrap();
+    let ciphertext = encrypt_data(plaintext_b, keys);
+    // let s = String::from_utf8(ciphertext.to_vec()).expect("Found invalid UTF-8");
+    // print!("\nCiphertext: {:x?}", s);
 
-    let ciphertext = encrypt_data(<[u8; 16]>::try_from(plaintext.as_bytes()).unwrap(), keys);
-    let s = String::from_utf8(ciphertext.to_vec()).expect("Found invalid UTF-8");
-    print!("\nCiphertext: {:x?}", s);
+    let plaintext_2 = decrypt_data(ciphertext, keys);
+    let x = String::from_utf8(ciphertext.to_vec()).expect("Found invalid UTF-8");
+    print!("\nCiphertext: {:x?}", x);
+
     //
     // let decrypted = decrypt_data(ciphertext, keys);
     // print!("\nDecrypted text: {:x?}", decrypted);

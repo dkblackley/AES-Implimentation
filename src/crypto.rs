@@ -25,7 +25,7 @@ fn rot_word(word: &[u8]) -> [u8; 4] {
 }
 
 fn multiply_GF(mut a: u8, mut b: u8) -> u8 {
-    //Multiplication in the GF is defined as a*b + p
+    // Multiplication in the GF is defined as a*b ^ p
 
     let mut p = 0x00;
 
@@ -61,9 +61,6 @@ fn sub_word(a: [u8; 4]) -> [u8; 4] {
 
 fn affine_transform(c: u8) -> u8 {
 
-    let mut utility_bit = 0x01;
-    let vector: [u8; 8] = [0x8F, 0xC7, 0xE3, 0xF1, 0xF8, 0x7C, 0x3E, 0x1F];
-
     let mut x = find_inverse(c);
     let mut s = x;
 
@@ -77,8 +74,23 @@ fn affine_transform(c: u8) -> u8 {
     return x;
 }
 
+fn inverse_affine_transform(c: u8) -> u8 {
+
+    let mut x = c;
+    let mut s = x;
+
+    x = left_circular_shift(s, 1);
+    x = x ^ left_circular_shift(s, 3);
+    x = x ^ left_circular_shift(s, 6);
+    x = x ^ 0x05;
+
+    x = find_inverse(x);
+
+    return x;
+}
+
 fn find_inverse(arr: u8) -> u8 {
-    //Inverse is described over GF(p^n) as a^p^n-2. i.e a's inverse is a^254
+    //  Inverse is described over GF(p^n) as a^p^n-2. i.e a's inverse is a^254
     let mut result = arr;
 
     for i in 1..254 {
@@ -181,10 +193,40 @@ fn mix_columns(word: [u8; 4]) -> [u8; 4] {
 
     for i in 0..4 {
         let MDS_row = MDS[i];
-        let b = word[i];
 
-        new_word[i] = (MDS_row[0].wrapping_mul( b)) ^ (MDS_row[1].wrapping_mul( b)) ^
-            (MDS_row[2].wrapping_mul( b)) ^ (MDS_row[3].wrapping_mul( b));
+        let mut result: u8 = multiply_GF(MDS_row[0], word[0]);
+        for c in 1..4 {
+            let multiple = multiply_GF(MDS_row[c],word[c]);
+            result = multiple ^ result;
+        }
+
+        new_word[i] = result;
+    }
+
+    return new_word;
+}
+
+fn inverse_mix_columns(word: [u8; 4]) -> [u8; 4] {
+
+    let MDS: [[u8; 4]; 4] = [
+        [14, 11, 13, 9],
+        [9, 14, 11, 13],
+        [13, 9, 14, 11],
+        [11, 13, 9, 14]
+    ];
+
+    let mut new_word: [u8; 4] = [0, 0, 0, 0];
+
+    for i in 0..4 {
+        let MDS_row = MDS[i];
+
+        let mut result: u8 = multiply_GF(MDS_row[0], word[0]);
+        for c in 1..4 {
+            let multiple = multiply_GF(MDS_row[c],word[c]);
+            result = multiple ^ result;
+        }
+
+        new_word[i] = result;
     }
 
     return new_word;
@@ -223,14 +265,14 @@ pub(crate) fn encrypt_data(plaintext: [u8; 16], keys: [[u8; 16]; 11]) -> [u8; 16
             for c in 0..4 {
                 let mut column: [u8; 4] = [0, 0, 0, 0];
 
-                for y in 0..3 {
-                    column[y] = ciphertext[(c*y) + y];
+                for y in 0..4 {
+                    column[y] = ciphertext[(c * 4) + y];
                 }
 
                 let mixed_column = mix_columns(column);
 
-                for y in 0..3 {
-                    ciphertext[(c*y) + y] = mixed_column[y];
+                for y in 0..4 {
+                    ciphertext[(c * 4) + y] = mixed_column[y];
                 }
             }
         }
@@ -243,6 +285,64 @@ pub(crate) fn encrypt_data(plaintext: [u8; 16], keys: [[u8; 16]; 11]) -> [u8; 16
     }
 
     return ciphertext;
+}
+
+pub(crate) fn decrypt_data(ciphertext: [u8; 16], keys: [[u8; 16]; 11]) -> [u8; 16] {
+    let mut plaintext :[u8; 16] = ciphertext.clone();
+    let encryption_key = keys[10];
+
+    //Perform the initial XOR
+    for i in 0..16 {
+        plaintext[i] = plaintext[i] ^ encryption_key[i];
+    }
+
+    for i in (0..10).rev() {
+
+        //Perform the inverse row shift
+        for c in 0..4 {
+            let mut word : [u8; 4] = <[u8; 4]>::try_from(&plaintext[c * 4..(c + 1) * 4]).unwrap();
+
+            for y in 0..4 {
+                word[y] = plaintext[c + (y * 4)];
+            }
+
+            // reverse the shift  by subtracting from 4, 0 = 4 (A full shift) 1 = 3 (Total of 4 back to beginning), etc.
+            let shift_word = shift_rows(<[u8; 4]>::try_from(word).unwrap(), 4 - c);
+            for y in 0..4 {
+                plaintext[c + (y * 4)] = shift_word[y]
+            }
+        }
+
+        // Perform the inverse S-Box
+        for c in 0..16 {
+            plaintext[c] = inverse_affine_transform(plaintext[c]);
+        }
+
+        //XOR with key before mix
+        for c in 0..16 {
+            plaintext[c] = plaintext[c] ^ keys[i][c]
+        }
+
+        if i != 0 { // Skip the mix column for the last round
+            // Invert the mix the columns
+            for c in 0..4 {
+                let mut column: [u8; 4] = [0, 0, 0, 0];
+
+                for y in 0..4 {
+                    column[y] = plaintext[(c * 4) + y];
+                }
+
+                let mixed_column = inverse_mix_columns(column);
+
+                for y in 0..4 {
+                    plaintext[(c * 4) + y] = mixed_column[y];
+                }
+            }
+        }
+
+    }
+
+    return plaintext;
 }
 //
 // pub(crate) fn decrypt_data(ciphertext: String, keys: [[u8; 16]; 10]) -> String {
